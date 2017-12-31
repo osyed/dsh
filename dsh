@@ -1,0 +1,117 @@
+#!/usr/bin/perl
+
+# TODO
+#   arrow up should bring previous command
+
+use Cwd;
+use Text::ParseWords    # needed for quotewords function
+
+`stty erase ^H`;
+$| = 1;
+
+$osh{help} = <<EOM;
+Short cut commands:
+  i               = image
+  c               = container
+  psa             = ps -a
+  runit           = run -it    run interactive container
+  rund            = run -d -P    run detached and print ports
+  rmexited        = remove containers that have exited
+  join            = exec -it
+  sh [c]          = exec -it [c] /bin/sh
+  flat [c] [i]    = export the container [c] and import it into an image with tag [i] 
+EOM
+
+while(1){
+  $osh{cwd} = getcwd;
+#  print "$ENV{USER}\@$ENV{HOST}$osh{cwd}> ";
+  print "$osh{cwd}:dsh> ";
+  $osh{in} = <>;
+  chomp($osh{in});
+  $osh{ws} = 0; if ($osh{in} =~ m/^ /){ $osh{ws} = 1; }
+  $osh{in} =~ s/^ +//;
+  $osh{in} =~ s/ +$//;
+  if ($osh{in} eq ""){ next; }
+  ($osh{cmd}, $osh{args}) = ($osh{in} =~ m/^(\w+) *(.*)/);
+
+# exit, quit or bye - exits the shell
+  if ($osh{cmd} =~ m/^(exit|quit|bye)/){
+    exit;
+  }
+
+  if ($osh{ws}){
+# go command - does cd
+    if (($osh{cmd} eq "go") || ($osh{cmd} eq "cd")){
+      ($osh{args}) = ($osh{args} =~ m/^(\S+)/);
+      $osh{es} = '$osh{xs} = ' . "\"$osh{args}\"";
+      eval($osh{es});
+      chdir $osh{xs};
+      next;
+    }
+  
+# mark command - saves the current directory
+    if ($osh{cmd} eq "mark"){
+      ($osh{args}) = ($osh{args} =~ m/^(\w+)/);
+      if ($osh{args} ne ""){
+        $osh{es} = "\$$osh{args} = '$osh{cwd}'";
+        print "$osh{es}\n";
+        eval("$osh{es}");
+      }
+      next;
+    }
+  }
+
+
+  if ($osh{ws}){
+# Do shell commands; begin with white space
+    if (($osh{cmd} eq "ls") && ($osh{args} eq "")){
+      print `/bin/bash -c 'ls -C'`;
+      next;
+    }
+    print `/bin/bash -c '$osh{in}'`;
+    next;
+  }
+  else{
+
+# handle our docker short commands
+    if ($osh{cmd} eq 'c'){ 
+      if ($osh{args} eq ""){ $osh{in} = "ps -a"; }
+      else{ $osh{in} =~ s/c/container/; }
+    }
+    if ($osh{cmd} eq 'i'){ 
+      if ($osh{args} eq ""){ $osh{in} = "images"; }
+      else{ $osh{in} =~ s/i/image/; }
+    }
+    if ($osh{cmd} eq 'flat'){ 
+      @args = quotewords('\s+', 0, $osh{args});
+      if ($#args == 1){
+        print `docker export $args[0] | docker import - $args[1]`;
+        next;
+      }
+    }
+    if ($osh{cmd} eq 'psa'){ $osh{in} =~ s/psa/ps -a/; }
+    if ($osh{cmd} eq 'runit'){ $osh{in} =~ s/runit/run -it/; }
+    if ($osh{cmd} eq 'rund'){ $osh{in} =~ s/rund/run -d -P/; }
+    if ($osh{cmd} eq 'join'){ $osh{in} =~ s/join/exec -it/; }
+    if ($osh{cmd} eq 'sh'){ $osh{in} = "exec -it $osh{args} sh";  }
+    if ($osh{cmd} eq 'rmexited'){ 
+      $osh{in} =~ s/rmexited/container prune/; 
+#      $osh{in} =~ s/rmexited/rm \$\(docker ps -a -q -f status=exited\)/; 
+#      print `docker $osh{in}`;
+#      next;
+    }
+
+# Do docker commands
+    @args = quotewords('\s+', 0, $osh{in});
+    system 'docker', @args;
+
+    if ($osh{in} =~ /^help$/){ print "\n" . $osh{help} . "\n"; }
+    
+    next;
+  }
+
+}
+
+
+
+
